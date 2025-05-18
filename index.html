@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>彩色粒子文字效果</title>
+    <style>
+        body {
+            margin: 0;
+            background-color: #000;
+            color: #eee;
+            font-family: 'Arial', sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            overflow: hidden;
+        }
+        canvas {
+            display: block;
+        }
+        .controls {
+            margin-bottom: 20px;
+            padding: 15px;
+            background-color: rgba(20, 20, 20, 0.8);
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(128, 0, 128, 0.5);
+            z-index: 10;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        input[type="text"] {
+            padding: 10px;
+            font-size: 16px;
+            border: 1px solid #555;
+            background-color: #222;
+            color: #eee;
+            border-radius: 4px;
+        }
+        .color-inputs {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        input[type="color"] {
+            width: 50px;
+            height: 40px;
+            padding: 0 5px;
+            border: none;
+            border-radius: 4px;
+            background-color: #222;
+            cursor: pointer;
+        }
+        button {
+            padding: 10px 15px;
+            font-size: 16px;
+            cursor: pointer;
+            background-color: #800080;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            transition: background-color 0.3s ease;
+        }
+        button:hover {
+            background-color: #a040a0;
+        }
+        select {
+            padding: 10px;
+            font-size: 16px;
+            background-color: #222;
+            color: #eee;
+            border: 1px solid #555;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <div class="controls">
+        <input type="text" id="nameInput" placeholder="输入名字" value="VOXELO">
+        <div class="color-inputs">
+            <select id="colorMode">
+                <option value="gradient">渐变色</option>
+                <option value="random">随机色</option>
+                <option value="solid">单色</option>
+            </select>
+            <input type="color" id="colorPicker1" value="#ff0000">
+            <input type="color" id="colorPicker2" value="#00ff00">
+        </div>
+        <button id="updateButton">生成粒子文字</button>
+    </div>
+    <canvas id="particleCanvas"></canvas>
+
+    <script>
+        const canvas = document.getElementById('particleCanvas');
+        const ctx = canvas.getContext('2d');
+        const nameInput = document.getElementById('nameInput');
+        const colorPicker1 = document.getElementById('colorPicker1');
+        const colorPicker2 = document.getElementById('colorPicker2');
+        const colorMode = document.getElementById('colorMode');
+        const updateButton = document.getElementById('updateButton');
+
+        let particlesArray = [];
+        const mouse = {
+            x: null,
+            y: null,
+            radius: 100
+        };
+
+        const PARTICLE_DENSITY = 2;
+        const PARTICLE_BASE_SIZE = 1.5;
+        const MOUSE_REPEL_FORCE = 25;
+        const RETURN_FORCE = 0.08;
+        const FRICTION = 0.96;
+
+        // 颜色工具函数
+        function hexToRgb(hex) {
+            const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+            return result ? {
+                r: parseInt(result[1], 16),
+                g: parseInt(result[2], 16),
+                b: parseInt(result[3], 16)
+            } : null;
+        }
+
+        function getRandomColor() {
+            const letters = '0123456789ABCDEF';
+            let color = '#';
+            for (let i = 0; i < 6; i++) {
+                color += letters[Math.floor(Math.random() * 16)];
+            }
+            return color;
+        }
+
+        function interpolateColors(color1, color2, factor) {
+            const rgb1 = hexToRgb(color1);
+            const rgb2 = hexToRgb(color2);
+            
+            const r = Math.round(rgb1.r + (rgb2.r - rgb1.r) * factor);
+            const g = Math.round(rgb1.g + (rgb2.g - rgb1.g) * factor);
+            const b = Math.round(rgb1.b + (rgb2.b - rgb1.b) * factor);
+            
+            return `rgb(${r},${g},${b})`;
+        }
+
+        function resizeCanvas() {
+            canvas.width = window.innerWidth * 0.95;
+            canvas.height = window.innerHeight * 0.7;
+            if (nameInput.value.trim()) {
+                initParticles(nameInput.value.trim());
+            } else {
+                particlesArray = [];
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+            }
+        }
+        window.addEventListener('resize', resizeCanvas);
+
+        class Particle {
+            constructor(x, y, homeX, homeY, totalParticles, index) {
+                this.x = x;
+                this.y = y;
+                this.size = Math.random() * 1.5 + PARTICLE_BASE_SIZE;
+                this.homeX = homeX;
+                this.homeY = homeY;
+                this.vx = (Math.random() - 0.5) * 3;
+                this.vy = (Math.random() - 0.5) * 3;
+                
+                // 根据不同模式设置颜色
+                switch(colorMode.value) {
+                    case 'gradient':
+                        const factor = index / totalParticles;
+                        this.color = interpolateColors(colorPicker1.value, colorPicker2.value, factor);
+                        break;
+                    case 'random':
+                        this.color = getRandomColor();
+                        break;
+                    case 'solid':
+                        this.color = colorPicker1.value;
+                        break;
+                }
+            }
+
+            draw() {
+                ctx.fillStyle = this.color;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                ctx.closePath();
+                ctx.fill();
+            }
+
+            update() {
+                if (mouse.x !== null && mouse.y !== null) {
+                    let dxMouse = this.x - mouse.x;
+                    let dyMouse = this.y - mouse.y;
+                    let distanceMouse = Math.sqrt(dxMouse * dxMouse + dyMouse * dyMouse);
+                    
+                    if (distanceMouse < mouse.radius) {
+                        let forceDirectionX = dxMouse / distanceMouse;
+                        let forceDirectionY = dyMouse / distanceMouse;
+                        let force = (mouse.radius - distanceMouse) / mouse.radius;
+                        let directionX = forceDirectionX * force * MOUSE_REPEL_FORCE;
+                        let directionY = forceDirectionY * force * MOUSE_REPEL_FORCE;
+                        this.vx += directionX;
+                        this.vy += directionY;
+                    }
+                }
+
+                let dxHome = this.homeX - this.x;
+                let dyHome = this.homeY - this.y;
+
+                this.vx += dxHome * RETURN_FORCE;
+                this.vy += dyHome * RETURN_FORCE;
+
+                this.vx *= FRICTION;
+                this.vy *= FRICTION;
+
+                this.x += this.vx;
+                this.y += this.vy;
+            }
+        }
+
+        function getTextPixelData(text) {
+            const tempCanvas = document.createElement('canvas');
+            const tempCtx = tempCanvas.getContext('2d');
+
+            const targetFontSize = Math.min(canvas.height / 3.5, canvas.width / (text.length * 0.6 || 1));
+            const fontSize = Math.max(20, targetFontSize);
+            tempCtx.font = `bold ${fontSize}px Arial`;
+            
+            const textMetrics = tempCtx.measureText(text);
+            tempCanvas.width = Math.ceil(textMetrics.width) || 1;
+            tempCanvas.height = Math.ceil(fontSize * 1.2);
+
+            tempCtx.font = `bold ${fontSize}px Arial`;
+            tempCtx.fillStyle = '#fff';
+            tempCtx.textAlign = 'left';
+            tempCtx.textBaseline = 'top';
+            tempCtx.fillText(text, 0, 0);
+
+            if (tempCanvas.width === 0 || tempCanvas.height === 0) return [];
+
+            const offsetX = (canvas.width - tempCanvas.width) / 2;
+            const offsetY = (canvas.height - tempCanvas.height) / 2;
+
+            const imageData = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
+            const pixels = [];
+            for (let y = 0; y < imageData.height; y += PARTICLE_DENSITY) {
+                for (let x = 0; x < imageData.width; x += PARTICLE_DENSITY) {
+                    const alphaIndex = (y * imageData.width + x) * 4 + 3;
+                    if (imageData.data[alphaIndex] > 128) {
+                        pixels.push({ x: x + offsetX, y: y + offsetY });
+                    }
+                }
+            }
+            return pixels;
+        }
+
+        function initParticles(text) {
+            particlesArray = [];
+            const textPixels = getTextPixelData(text);
+            const totalParticles = textPixels.length;
+
+            textPixels.forEach((pixel, index) => {
+                let startX = Math.random() * canvas.width;
+                let startY = Math.random() * canvas.height;
+                particlesArray.push(new Particle(startX, startY, pixel.x, pixel.y, totalParticles, index));
+            });
+        }
+
+        function animate() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            for (let i = 0; i < particlesArray.length; i++) {
+                particlesArray[i].update();
+                particlesArray[i].draw();
+            }
+            requestAnimationFrame(animate);
+        }
+
+        canvas.addEventListener('mousemove', (event) => {
+            const rect = canvas.getBoundingClientRect();
+            mouse.x = event.clientX - rect.left;
+            mouse.y = event.clientY - rect.top;
+        });
+
+        canvas.addEventListener('mouseleave', () => {
+            mouse.x = null;
+            mouse.y = null;
+        });
+
+        // 更新事件监听器
+        updateButton.addEventListener('click', () => {
+            const newName = nameInput.value.trim();
+            if (newName) {
+                initParticles(newName);
+            } else {
+                particlesArray = [];
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+            }
+        });
+
+        // 颜色模式变化监听
+        colorMode.addEventListener('change', () => {
+            const newName = nameInput.value.trim();
+            if (newName) {
+                initParticles(newName);
+            }
+        });
+
+        // 颜色选择器变化监听
+        colorPicker1.addEventListener('input', () => {
+            if (colorMode.value !== 'random') {
+                const newName = nameInput.value.trim();
+                if (newName) {
+                    initParticles(newName);
+                }
+            }
+        });
+
+        colorPicker2.addEventListener('input', () => {
+            if (colorMode.value === 'gradient') {
+                const newName = nameInput.value.trim();
+                if (newName) {
+                    initParticles(newName);
+                }
+            }
+        });
+
+        resizeCanvas();
+        animate();
+    </script>
+</body>
+</html>
